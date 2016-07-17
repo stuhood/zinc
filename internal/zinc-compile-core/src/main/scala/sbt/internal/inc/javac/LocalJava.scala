@@ -70,8 +70,9 @@ final class LocalJavaCompiler(compiler: javax.tools.JavaCompiler) extends XJavaC
     val logWriter = new PrintWriter(logger)
     log.debug("Attempting to call " + compiler + " directly...")
     val diagnostics = new DiagnosticsReporter(reporter)
-    val fileManager = compiler.getStandardFileManager(diagnostics, null, null)
-    val jfiles = fileManager.getJavaFileObjectsFromFiles(sources.toList.asJava)
+    val standardFileManager = compiler.getStandardFileManager(diagnostics, null, null)
+    val fileManager = new LoggingJavaFileManager(standardFileManager, log)
+    val jfiles = standardFileManager.getJavaFileObjectsFromFiles(sources.toList.asJava)
 
     // Local Java compiler doesn't accept `-J<flag>` options. We emit a warning if we find
     // such options and don't pass them to the compiler.
