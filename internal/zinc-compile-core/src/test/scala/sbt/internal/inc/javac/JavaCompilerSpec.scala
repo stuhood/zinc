@@ -12,7 +12,7 @@ import xsbti.{ Severity, Problem }
 import xsbti.compile.{ JavaTools => XJavaTools }
 import sbt.io.IO
 import sbt.util.Logger
-import sbt.internal.util.UnitSpec
+import sbt.internal.util.{ UnitSpec, ConsoleLogger }
 import org.scalatest.matchers._
 
 class JavaCompilerSpec extends UnitSpec {
@@ -151,7 +151,7 @@ class JavaCompilerSpec extends UnitSpec {
   }
 
   def compile(c: XJavaTools, sources: Seq[File], args: Seq[String]): (Boolean, Array[Problem]) = {
-    val log = Logger.Null
+    val log = ConsoleLogger()
     val reporter = new LoggerReporter(10, log)
     val result = c.javac.run(sources.toArray, args.toArray, reporter, log)
     (result, reporter.problems)
