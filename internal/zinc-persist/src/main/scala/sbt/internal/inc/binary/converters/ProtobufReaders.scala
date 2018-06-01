@@ -8,6 +8,7 @@
 package sbt.internal.inc.binary.converters
 
 import java.io.File
+import scala.collection.mutable
 
 import sbt.internal.inc.Relations.ClassDependencies
 import sbt.internal.inc._
@@ -21,9 +22,18 @@ import sbt.internal.inc.binary.converters.ProtobufDefaults.{ Classes, ReadersCon
 import sbt.internal.util.Relation
 import xsbti.api._
 
+/**
+ * Each instance of this class will intern (most) deserialized strings in one (instance-level)
+ * pool, so it's recommended to use a new instance per deserialized top-level object (generally
+ * `AnalysisFile`).
+ */
 final class ProtobufReaders(mapper: ReadMapper) {
+  private[this] val internMap = mutable.Map[String, String]()
+
+  private[this] def intern(str: String): String = internMap.getOrElseUpdate(str, str)
+
   def fromPathString(path: String): File = {
-    java.nio.file.Paths.get(path).toFile
+    java.nio.file.Paths.get(intern(path)).toFile
   }
 
   def fromStampType(stampType: schema.Stamps.StampType): Stamp = {
@@ -117,7 +127,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
   def fromPosition(position: schema.Position): Position = {
     import ProtobufDefaults.{ MissingString, MissingInt }
     def fromString(value: String): Option[String] =
-      if (value == MissingString) None else Some(value)
+      if (value == MissingString) None else Some(intern(value))
     def fromInt(value: Int): Option[Integer] =
       if (value == MissingInt) None else Some(value)
     InterfaceUtil.position(
@@ -151,7 +161,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
   }
 
   def fromSourceInfo(sourceInfo: schema.SourceInfo): SourceInfo = {
-    val mainClasses = sourceInfo.mainClasses
+    val mainClasses = sourceInfo.mainClasses.map(intern)
     val reportedProblems = sourceInfo.reportedProblems.map(fromProblem)
     val unreportedProblems = sourceInfo.unreportedProblems.map(fromProblem)
     SourceInfos.makeInfo(reported = reportedProblems,
@@ -240,7 +250,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
       import SchemaPath.{ Component => SchemaComponent }
       import Classes.{ Component, PathComponent }
       pathComponent.component match {
-        case SchemaComponent.Id(c) => Id.of(c.id)
+        case SchemaComponent.Id(c) => Id.of(intern(c.id))
         case SchemaComponent.Super(c) =>
           Super.of(c.qualifier.read(fromPath, ExpectedPathInSuper))
         case SchemaComponent.This(_) => ReadersConstants.This
@@ -253,8 +263,8 @@ final class ProtobufReaders(mapper: ReadMapper) {
 
   def fromAnnotation(annotation: schema.Annotation): Annotation = {
     def fromAnnotationArgument(argument: schema.AnnotationArgument): AnnotationArgument = {
-      val name = argument.name
-      val value = argument.value
+      val name = intern(argument.name)
+      val value = intern(argument.value)
       AnnotationArgument.of(name, value)
     }
 
@@ -274,7 +284,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
   def fromType(`type`: schema.Type): Type = {
     import ReadersFeedback.expectedBaseIn
     def fromParameterRef(tpe: schema.Type.ParameterRef): ParameterRef = {
-      ParameterRef.of(tpe.id)
+      ParameterRef.of(intern(tpe.id))
     }
 
     def fromParameterized(tpe: schema.Type.Parameterized): Parameterized = {
@@ -291,7 +301,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
 
     def fromConstant(tpe: schema.Type.Constant): Constant = {
       val baseType = tpe.baseType.read(fromType, expectedBaseIn(Classes.Constant))
-      val value = tpe.value
+      val value = intern(tpe.value)
       Constant.of(baseType, value)
     }
 
@@ -307,7 +317,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     }
 
     def fromProjection(tpe: schema.Type.Projection): Projection = {
-      val id = tpe.id
+      val id = intern(tpe.id)
       val prefix = tpe.prefix.read(fromType, ReadersFeedback.ExpectedPrefixInProjection)
       Projection.of(prefix, id)
     }
@@ -340,7 +350,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     def fromQualifier(qualifier: schema.Qualifier): Qualifier = {
       import schema.Qualifier.{ Type => QualifierType }
       qualifier.`type` match {
-        case QualifierType.IdQualifier(q)   => IdQualifier.of(q.value)
+        case QualifierType.IdQualifier(q)   => IdQualifier.of(intern(q.value))
         case QualifierType.ThisQualifier(_) => ReadersConstants.ThisQualifier
         case QualifierType.Unqualified(_)   => ReadersConstants.Unqualified
         case QualifierType.Empty            => ReadersFeedback.ExpectedNonEmptyQualifier.!!
@@ -376,7 +386,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
       ExpectedUpperBoundInTypeDeclaration
     }
 
-    val name = classDefinition.name
+    val name = intern(classDefinition.name)
     val access = classDefinition.access.read(fromAccess, MissingAccessInDef)
     val modifiers = classDefinition.modifiers.read(fromModifiers, MissingModifiersInDef)
     val annotations = classDefinition.annotations.toZincArray(fromAnnotation)
@@ -392,7 +402,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
               ReadersFeedback.UnrecognizedParamModifier.!!
           }
         }
-        val name = methodParameter.name
+        val name = intern(methodParameter.name)
         val hasDefault = methodParameter.hasDefault
         val `type` = methodParameter.`type`.read(fromType, expectedTypeIn(Classes.MethodParameter))
         val modifier = fromParameterModifier(methodParameter.modifier)
@@ -463,7 +473,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     }
 
     import ReadersFeedback.{ ExpectedLowerBoundInTypeParameter, ExpectedUpperBoundInTypeParameter }
-    val id = typeParameter.id
+    val id = intern(typeParameter.id)
     val annotations = typeParameter.annotations.toZincArray(fromAnnotation)
     val typeParameters = typeParameter.typeParameters.toZincArray(fromTypeParameter)
     val variance = fromVariance(typeParameter.variance)
@@ -475,7 +485,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
   def fromClassLike(classLike: schema.ClassLike): ClassLike = {
     def expectedMsg(msg: String) = ReadersFeedback.expected(msg, Classes.ClassLike)
     def expected(clazz: Class[_]) = expectedMsg(clazz.getName)
-    val name = classLike.name
+    val name = intern(classLike.name)
     val access = classLike.access.read(fromAccess, expected(Classes.Access))
     val modifiers = classLike.modifiers.read(fromModifiers, expected(Classes.Modifiers))
     val annotations = classLike.annotations.toZincArray(fromAnnotation)
@@ -484,7 +494,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     val definitionType = fromDefinitionType(classLike.definitionType)
     val selfType = mkLazy(classLike.selfType.read(fromType, expectedMsg("self type")))
     val structure = mkLazy(classLike.structure.read(fromStructure, expected(Classes.Structure)))
-    val savedAnnotations = classLike.savedAnnotations.toArray
+    val savedAnnotations = classLike.savedAnnotations.map(intern).toArray
     val childrenOfSealedClass = classLike.childrenOfSealedClass.toZincArray(fromType)
     val topLevel = classLike.topLevel
     val typeParameters = classLike.typeParameters.toZincArray(fromTypeParameter)
@@ -521,7 +531,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     }
 
     def fromNameHash(nameHash: schema.NameHash): NameHash = {
-      val name = nameHash.name
+      val name = intern(nameHash.name)
       val hash = nameHash.hash
       val scope = fromUseScope(nameHash.scope)
       NameHash.of(name, scope, hash)
@@ -530,7 +540,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     import SafeLazyProxy.{ strict => mkLazy }
     import ReadersFeedback.ExpectedCompanionsInAnalyzedClass
     val compilationTimestamp = analyzedClass.compilationTimestamp
-    val name = analyzedClass.name
+    val name = intern(analyzedClass.name)
     val api = mkLazy(analyzedClass.api.read(fromCompanions, ExpectedCompanionsInAnalyzedClass))
     val apiHash = analyzedClass.apiHash
     val nameHashes = analyzedClass.nameHashes.toZincArray(fromNameHash)
@@ -538,7 +548,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     AnalyzedClass.of(compilationTimestamp, name, api, apiHash, nameHashes, hasMacro)
   }
 
-  private final val stringId = identity[String] _
+  private final val stringId = intern _
   private final val stringToFile = (path: String) => fromPathString(path)
   def fromRelations(relations: schema.Relations): Relations = {
     def fromMap[K, V](map: Map[String, schema.Values],
@@ -559,7 +569,7 @@ final class ProtobufReaders(mapper: ReadMapper) {
     }
 
     def fromUsedName(usedName: schema.UsedName): UsedName = {
-      val name = usedName.name
+      val name = intern(usedName.name)
       val scopes = usedName.scopes.iterator.map(fromUseScope).toIterable
       UsedName.apply(name, scopes)
     }
@@ -608,8 +618,8 @@ final class ProtobufReaders(mapper: ReadMapper) {
   }
 
   def fromApis(apis: schema.APIs): APIs = {
-    val internal = apis.internal.mapValues(fromAnalyzedClass)
-    val external = apis.external.mapValues(fromAnalyzedClass)
+    val internal = apis.internal.map { case (k, v) => intern(k) -> fromAnalyzedClass(v) }
+    val external = apis.external.map { case (k, v) => intern(k) -> fromAnalyzedClass(v) }
     APIs(internal = internal, external = external)
   }
 
