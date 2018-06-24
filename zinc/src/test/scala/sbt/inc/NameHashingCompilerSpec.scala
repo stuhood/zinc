@@ -55,6 +55,11 @@ class NameHashingCompilerSpec extends BaseCompilerSpec {
       |$in
       |object OtherSealedNew extends OtherSealed
     """.stripMargin
+  def addOddlyNamedClass(in: String) =
+    s"""
+      |$in
+      |object ${"Odd$$Example"}
+    """.stripMargin
 
   import SourceFiles.Naha._
 
@@ -111,4 +116,10 @@ class NameHashingCompilerSpec extends BaseCompilerSpec {
     )
   }
 
+  it should "handle oddly named classes" in {
+    testIncrementalCompilation(
+      changes = Seq(Other -> addOddlyNamedClass),
+      transitiveChanges = Set()
+    )
+  }
 }
